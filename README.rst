@@ -1,5 +1,5 @@
 =================
-python-bitcoinrpc
+pie-python-bitcoinrpc
 =================
 
 AuthServiceProxy is an improved version of python-jsonrpc.
@@ -30,7 +30,7 @@ backwards compatibility, you have to replace 'bitcoinrpc' with 'jsonrpc' in setu
 
 Or simply install the library using pip::
 
-    pip install python-bitcoinrpc
+    pip install pie-python-bitcoinrpc
 
 Example
 =======

@@ -42,6 +42,7 @@ import base64
 import decimal
 import json
 import logging
+import requests
 try:
     import urllib.parse as urlparse
 except ImportError:
@@ -118,12 +119,8 @@ class AuthServiceProxy(object):
         if connection:
             # Callables re-use the connection of the original proxy
             self.__conn = connection
-        elif self.__url.scheme == 'https':
-            self.__conn = httplib.HTTPSConnection(self.__url.hostname, port,
-                                                  timeout=timeout, context=ssl_context)
         else:
-            self.__conn = httplib.HTTPConnection(self.__url.hostname, port,
-                                                 timeout=timeout)
+            self.__conn = requests.Session()
 
     def __getattr__(self, name):
         if name.startswith('__') and name.endswith('__'):
@@ -137,26 +134,27 @@ class AuthServiceProxy(object):
         AuthServiceProxy.__id_count += 1
 
         log.debug("-%s-> %s %s"%(AuthServiceProxy.__id_count, self.__service_name,
-                                 jsondumps(args)))
-        postdata = jsondumps({'version': '1.1',
-                               'method': self.__service_name,
-                               'params': args,
-                               'id': AuthServiceProxy.__id_count})
-        self.__conn.request('POST', self.__url.path, postdata,
-                            {'Host': self.__url.hostname,
-                             'User-Agent': USER_AGENT,
-                             'Authorization': self.__auth_header,
-                             'Content-type': 'application/json'})
-        self.__conn.sock.settimeout(self.__timeout)
-
-        response = self._get_response()
-        if response.get('error') is not None:
-            raise JSONRPCException(response['error'])
-        elif 'result' not in response:
+                                 jsondumps(args)))                        
+        response = self.__conn.post(url=self.__service_url, 
+        headers={
+            'User-Agent': USER_AGENT,
+            'Content-type': 'application/json'
+        },
+        json={
+            'version': '1.1',
+            'method': self.__service_name,
+            'params': args,
+            'id': AuthServiceProxy.__id_count
+        })                     
+        if response.status_code != 200:
+            raise JSONRPCException(response.text)
+        j = response.json()    
+        result = j.get('result', None)
+        if result is None:
             raise JSONRPCException({
                 'code': -343, 'message': 'missing JSON-RPC result'})
         
-        return response['result']
+        return result
 
     def batch_(self, rpc_calls):
         """Batch RPC call.
