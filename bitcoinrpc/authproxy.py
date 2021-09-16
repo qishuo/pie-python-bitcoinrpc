@@ -34,19 +34,10 @@
   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 """
 
-try:
-    import http.client as httplib
-except ImportError:
-    import httplib
-import base64
 import decimal
 import json
 import logging
 import requests
-try:
-    import urllib.parse as urlparse
-except ImportError:
-    import urlparse
 
 USER_AGENT = "AuthServiceProxy/0.1"
 
@@ -97,23 +88,6 @@ class AuthServiceProxy(object):
                  connection=None, ssl_context=None):
         self.__service_url = service_url
         self.__service_name = service_name
-        self.__url = urlparse.urlparse(service_url)
-        if self.__url.port is None:
-            port = 80
-        else:
-            port = self.__url.port
-        (user, passwd) = (self.__url.username, self.__url.password)
-        try:
-            user = user.encode('utf8')
-        except AttributeError:
-            pass
-        try:
-            passwd = passwd.encode('utf8')
-        except AttributeError:
-            pass
-        authpair = user + b':' + passwd
-        self.__auth_header = b'Basic ' + base64.b64encode(authpair)
-
         self.__timeout = timeout
 
         if connection:
@@ -135,17 +109,18 @@ class AuthServiceProxy(object):
 
         log.debug("-%s-> %s %s"%(AuthServiceProxy.__id_count, self.__service_name,
                                  jsondumps(args)))                        
-        response = self.__conn.post(url=self.__service_url, 
+        response = self.__conn.post(url=self.__service_url,
         headers={
             'User-Agent': USER_AGENT,
-            'Content-type': 'application/json'
+            'Content-type': 'application/json',
+            'Accept-encoding': 'br,gzip'
         },
         json={
             'version': '1.1',
             'method': self.__service_name,
             'params': args,
             'id': AuthServiceProxy.__id_count
-        })                     
+        })                    
         if response.status_code != 200:
             raise JSONRPCException(response.text)
         j = response.json()    
@@ -169,43 +144,31 @@ class AuthServiceProxy(object):
 
         postdata = jsondumps(batch_data)
         log.debug("--> "+postdata)
-        self.__conn.request('POST', self.__url.path, postdata,
-                            {'Host': self.__url.hostname,
-                             'User-Agent': USER_AGENT,
-                             'Authorization': self.__auth_header,
-                             'Content-type': 'application/json'})
+        responses = self.__conn.post(url=self.__service_url,
+        headers={
+            'User-Agent': USER_AGENT,
+            'Content-type': 'application/json',
+            'Accept-encoding': 'br,gzip'
+        },
+        json=batch_data)
         results = []
-        responses = self._get_response()
-        if isinstance(responses, (dict,)):
-            if ('error' in responses) and (responses['error'] is not None):
-                raise JSONRPCException(responses['error'])
+        if responses.status_code != 200:
+            raise JSONRPCException(responses.text)
+        res = responses.json() 
+        if isinstance(res, (dict,)):
+            error = res.get('error', None)
+            if error is not None:
+                raise JSONRPCException(error)
             raise JSONRPCException({
                 'code': -32700, 'message': 'Parse error'})
-        for response in responses:
-            if response['error'] is not None:
-                raise JSONRPCException(response['error'])
-            elif 'result' not in response:
+        for r in res:
+            error = r.get('error', None)
+            if error is not None:
+                print(error)
+                raise JSONRPCException(error)
+            elif r.get('result', None) is None:
                 raise JSONRPCException({
                     'code': -343, 'message': 'missing JSON-RPC result'})
             else:
-                results.append(response['result'])
+                results.append(r.get('result'))
         return results
-
-    def _get_response(self):
-        http_response = self.__conn.getresponse()
-        if http_response is None:
-            raise JSONRPCException({
-                'code': -342, 'message': 'missing HTTP response from server'})
-
-        content_type = http_response.getheader('Content-Type')
-        if content_type != 'application/json':
-            raise JSONRPCException({
-                'code': -342, 'message': 'non-JSON HTTP response with \'%i %s\' from server' % (http_response.status, http_response.reason)})
-
-        responsedata = http_response.read().decode('utf8')
-        response = json.loads(responsedata, parse_float=decimal.Decimal)
-        if "error" in response and response["error"] is None:
-            log.debug("<-%s- %s"%(response["id"], jsondumps(response["result"])))
-        else:
-            log.debug("<-- "+responsedata)
-        return response
